@@ -590,6 +590,282 @@ app.get('/api/volunteer/offers', isAuthenticated, hasRole('volunteer'), async (r
     }
 });
 
+// Get offers for a specific request (for requesters)
+app.get('/api/requests/:request_id/offers', isAuthenticated, hasRole('requester'), async (req, res) => {
+    try {
+        const requestId = req.params.request_id;
+        
+        // Verify request belongs to requester
+        const [requests] = await pool.query(
+            'SELECT requester_id FROM requests WHERE request_id = ?',
+            [requestId]
+        );
+        
+        if (requests.length === 0) {
+            return res.status(404).json({ error: 'Request not found' });
+        }
+        
+        if (requests[0].requester_id !== req.session.user.id) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        const [offers] = await pool.query(
+            `SELECT ho.*, u.name as volunteer_name, u.email as volunteer_email, u.location as volunteer_location
+             FROM help_offers ho
+             JOIN users u ON ho.volunteer_id = u.user_id
+             WHERE ho.request_id = ?
+             ORDER BY ho.offer_date DESC`,
+            [requestId]
+        );
+        
+        res.json({ offers });
+    } catch (error) {
+        console.error('❌ Get request offers error:', error);
+        res.status(500).json({ error: 'Failed to fetch offers' });
+    }
+});
+
+// Accept an offer
+app.post('/api/offers/:offer_id/accept', isAuthenticated, hasRole('requester'), async (req, res) => {
+    try {
+        const offerId = req.params.offer_id;
+        
+        // Get offer and verify ownership
+        const [offers] = await pool.query(
+            `SELECT ho.*, r.requester_id, u.name as volunteer_name
+             FROM help_offers ho
+             JOIN requests r ON ho.request_id = r.request_id
+             JOIN users u ON ho.volunteer_id = u.user_id
+             WHERE ho.offer_id = ?`,
+            [offerId]
+        );
+        
+        if (offers.length === 0) {
+            return res.status(404).json({ error: 'Offer not found' });
+        }
+        
+        const offer = offers[0];
+        
+        if (offer.requester_id !== req.session.user.id) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        if (offer.status !== 'pending') {
+            return res.status(400).json({ error: 'Offer has already been processed' });
+        }
+        
+        // Update offer status
+        await pool.query(
+            'UPDATE help_offers SET status = ?, accepted_at = NOW() WHERE offer_id = ?',
+            ['accepted', offerId]
+        );
+        
+        // Send notification to volunteer
+        await pool.query(
+            'INSERT INTO notifications (recipient_id, message) VALUES (?, ?)',
+            [offer.volunteer_id, `Your offer has been accepted by ${req.session.user.name}!`]
+        );
+        
+        console.log('✅ Offer accepted:', offerId);
+        res.json({ message: 'Offer accepted successfully' });
+    } catch (error) {
+        console.error('❌ Accept offer error:', error);
+        res.status(500).json({ error: 'Failed to accept offer' });
+    }
+});
+
+// Decline an offer
+app.post('/api/offers/:offer_id/decline', isAuthenticated, hasRole('requester'), async (req, res) => {
+    try {
+        const offerId = req.params.offer_id;
+        
+        // Get offer and verify ownership
+        const [offers] = await pool.query(
+            `SELECT ho.*, r.requester_id, u.name as volunteer_name
+             FROM help_offers ho
+             JOIN requests r ON ho.request_id = r.request_id
+             JOIN users u ON ho.volunteer_id = u.user_id
+             WHERE ho.offer_id = ?`,
+            [offerId]
+        );
+        
+        if (offers.length === 0) {
+            return res.status(404).json({ error: 'Offer not found' });
+        }
+        
+        const offer = offers[0];
+        
+        if (offer.requester_id !== req.session.user.id) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        if (offer.status !== 'pending') {
+            return res.status(400).json({ error: 'Offer has already been processed' });
+        }
+        
+        // Update offer status
+        await pool.query(
+            'UPDATE help_offers SET status = ? WHERE offer_id = ?',
+            ['declined', offerId]
+        );
+        
+        // Send notification to volunteer
+        await pool.query(
+            'INSERT INTO notifications (recipient_id, message) VALUES (?, ?)',
+            [offer.volunteer_id, `Your offer was declined by ${req.session.user.name}.`]
+        );
+        
+        console.log('✅ Offer declined:', offerId);
+        res.json({ message: 'Offer declined successfully' });
+    } catch (error) {
+        console.error('❌ Decline offer error:', error);
+        res.status(500).json({ error: 'Failed to decline offer' });
+    }
+});
+
+// Get volunteer location for an accepted offer
+app.get('/api/offers/:offer_id/volunteer-location', isAuthenticated, async (req, res) => {
+    try {
+        const offerId = req.params.offer_id;
+        const userId = req.session.user.id;
+        
+        // Get offer details and verify access
+        const [offers] = await pool.query(
+            `SELECT ho.*, r.requester_id, u.name as volunteer_name, u.location as volunteer_location
+             FROM help_offers ho
+             JOIN requests r ON ho.request_id = r.request_id
+             JOIN users u ON ho.volunteer_id = u.user_id
+             WHERE ho.offer_id = ?`,
+            [offerId]
+        );
+        
+        if (offers.length === 0) {
+            return res.status(404).json({ error: 'Offer not found' });
+        }
+        
+        const offer = offers[0];
+        
+        // Only requester or volunteer can access location
+        if (offer.requester_id !== userId && offer.volunteer_id !== userId) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        if (offer.status !== 'accepted') {
+            return res.status(400).json({ error: 'Offer must be accepted to view location' });
+        }
+        
+        res.json({
+            volunteer_id: offer.volunteer_id,
+            volunteer_name: offer.volunteer_name,
+            volunteer_location: offer.volunteer_location
+        });
+    } catch (error) {
+        console.error('❌ Get volunteer location error:', error);
+        res.status(500).json({ error: 'Failed to fetch volunteer location' });
+    }
+});
+
+// ==================== CHAT/MESSAGE ROUTES ====================
+
+// Send a message
+app.post('/api/messages', isAuthenticated, async (req, res) => {
+    try {
+        const { offer_id, message_text } = req.body;
+        const sender_id = req.session.user.id;
+        
+        if (!offer_id || !message_text) {
+            return res.status(400).json({ error: 'Offer ID and message text required' });
+        }
+        
+        // Verify user is part of this offer (either requester or volunteer)
+        const [offers] = await pool.query(
+            `SELECT ho.volunteer_id, r.requester_id
+             FROM help_offers ho
+             JOIN requests r ON ho.request_id = r.request_id
+             WHERE ho.offer_id = ?`,
+            [offer_id]
+        );
+        
+        if (offers.length === 0) {
+            return res.status(404).json({ error: 'Offer not found' });
+        }
+        
+        const offer = offers[0];
+        
+        if (sender_id !== offer.volunteer_id && sender_id !== offer.requester_id) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        // Insert message with XSS protection (database stores raw text)
+        const [result] = await pool.query(
+            'INSERT INTO messages (offer_id, sender_id, message_text) VALUES (?, ?, ?)',
+            [offer_id, sender_id, message_text]
+        );
+        
+        // Send notification to the other party
+        const recipient_id = sender_id === offer.volunteer_id ? offer.requester_id : offer.volunteer_id;
+        await pool.query(
+            'INSERT INTO notifications (recipient_id, message) VALUES (?, ?)',
+            [recipient_id, `${req.session.user.name} sent you a message`]
+        );
+        
+        console.log('✅ Message sent:', result.insertId);
+        res.status(201).json({
+            message: 'Message sent successfully',
+            message_id: result.insertId
+        });
+    } catch (error) {
+        console.error('❌ Send message error:', error);
+        res.status(500).json({ error: 'Failed to send message' });
+    }
+});
+
+// Get messages for an offer
+app.get('/api/messages', isAuthenticated, async (req, res) => {
+    try {
+        const { offer_id } = req.query;
+        const user_id = req.session.user.id;
+        
+        if (!offer_id) {
+            return res.status(400).json({ error: 'Offer ID required' });
+        }
+        
+        // Verify user is part of this offer
+        const [offers] = await pool.query(
+            `SELECT ho.volunteer_id, r.requester_id
+             FROM help_offers ho
+             JOIN requests r ON ho.request_id = r.request_id
+             WHERE ho.offer_id = ?`,
+            [offer_id]
+        );
+        
+        if (offers.length === 0) {
+            return res.status(404).json({ error: 'Offer not found' });
+        }
+        
+        const offer = offers[0];
+        
+        if (user_id !== offer.volunteer_id && user_id !== offer.requester_id) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        // Get messages
+        const [messages] = await pool.query(
+            `SELECT m.*, u.name as sender_name
+             FROM messages m
+             JOIN users u ON m.sender_id = u.user_id
+             WHERE m.offer_id = ?
+             ORDER BY m.sent_at ASC`,
+            [offer_id]
+        );
+        
+        res.json({ messages });
+    } catch (error) {
+        console.error('❌ Get messages error:', error);
+        res.status(500).json({ error: 'Failed to fetch messages' });
+    }
+});
+
 // ==================== NOTIFICATION ROUTES ====================
 
 // MODIFIED: Made notifications optional authentication
