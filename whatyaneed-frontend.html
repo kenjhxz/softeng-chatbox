@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WhatYaNeed - Community Needs Board</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="whatyaneed-frontend.css">
+    <link rel="stylesheet" href="chat-map-styles.css">
 </head>
 <body>
     <header>
@@ -377,6 +379,55 @@
         </div>
     </footer>
 
+    <!-- Chat Modal -->
+    <div class="chat-modal" id="chat-modal">
+        <div class="chat-modal-content">
+            <div class="chat-modal-header">
+                <h3 class="chat-title">Chat</h3>
+                <button class="chat-close-btn" id="chat-close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-empty">
+                    <i class="fas fa-comments"></i>
+                    <p>No messages yet. Start the conversation!</p>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <div class="chat-input-container">
+                    <textarea 
+                        class="chat-input" 
+                        id="chat-input" 
+                        placeholder="Type your message..."
+                        rows="1"
+                    ></textarea>
+                    <button class="chat-send-btn" id="chat-send-btn">
+                        <i class="fas fa-paper-plane"></i> Send
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map Modal -->
+    <div class="map-modal" id="map-modal">
+        <div class="map-modal-content">
+            <div class="map-modal-header">
+                <h3>Volunteer Location</h3>
+                <button class="map-close-btn" id="map-close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="map-container">
+                <div id="volunteer-map"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="chat-system.js"></script>
+    <script src="map-display.js"></script>
     <script src="whatyaneed-frontend.js"></script>
 </body>
 </html>

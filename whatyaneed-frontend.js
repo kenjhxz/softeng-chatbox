@@ -819,7 +819,7 @@ function createRequesterRequestCard(request) {
     const statusMap = { open: 'Open', help_offered: 'Help Offered', closed: 'Completed' };
     
     return `
-        <div class="post-card">
+        <div class="post-card" data-request-id="${request.request_id}">
             <div class="post-image">
                 <i class="fas fa-${getCategoryIcon(request.category)} fa-3x"></i>
             </div>
@@ -833,6 +833,13 @@ function createRequesterRequestCard(request) {
                 <span class="post-status status-${request.status === 'open' ? 'open' : 'completed'}">
                     ${statusMap[request.status]} ${request.pending_offers > 0 ? `- ${request.pending_offers} Offers` : ''}
                 </span>
+                ${request.pending_offers > 0 ? `
+                    <div class="card-actions" style="margin-top: 12px;">
+                        <button class="btn btn-primary view-offers-btn" data-request-id="${request.request_id}">
+                            <i class="fas fa-users"></i> View ${request.pending_offers} Offer${request.pending_offers > 1 ? 's' : ''}
+                        </button>
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;
@@ -842,7 +849,7 @@ function createVolunteerOfferCard(offer) {
     const statusMap = { pending: 'Pending', accepted: 'Accepted', declined: 'Declined' };
     
     return `
-        <div class="post-card">
+        <div class="post-card" data-offer-id="${offer.offer_id}">
             <div class="post-image">
                 <i class="fas fa-hand-holding-heart fa-3x"></i>
             </div>
@@ -853,9 +860,21 @@ function createVolunteerOfferCard(offer) {
                     <span><i class="fas fa-map-marker-alt"></i> ${offer.location || 'N/A'}</span>
                 </div>
                 <p class="post-description">${offer.description}</p>
-                <span class="post-status status-${offer.status === 'accepted' ? 'completed' : 'pending'}">
+                <span class="offer-status-badge ${offer.status}">
                     ${statusMap[offer.status]}
                 </span>
+                ${offer.status === 'accepted' || offer.status === 'pending' ? `
+                    <div class="offer-actions">
+                        <button class="offer-action-btn chat open-chat-btn" data-offer-id="${offer.offer_id}" data-requester-name="${offer.requester_name}">
+                            <i class="fas fa-comments"></i> Chat
+                        </button>
+                        ${offer.status === 'accepted' ? `
+                            <button class="offer-action-btn view-map show-map-btn" data-offer-id="${offer.offer_id}">
+                                <i class="fas fa-map-marked-alt"></i> View Map
+                            </button>
+                        ` : ''}
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;
@@ -1233,5 +1252,339 @@ function addUrgentTimers() {
         }
     });
 }
+
+// ==================== CHAT AND MAP FUNCTIONALITY ====================
+
+let chatSystem = null;
+let mapDisplay = null;
+
+// Default map center (Cebu City, Philippines)
+const DEFAULT_MAP_CENTER = {
+    latitude: 10.3157,
+    longitude: 123.8854
+};
+
+// Initialize chat system
+function initializeChatSystem() {
+    if (!chatSystem) {
+        chatSystem = new ChatSystem('chat-modal', {
+            apiUrl: API_URL,
+            pollInterval: 3000,
+            maxMessageLength: 1000
+        });
+    }
+}
+
+// Initialize map display
+function initializeMapDisplay() {
+    if (!mapDisplay) {
+        mapDisplay = new MapDisplay('volunteer-map', {
+            center: [10.3157, 123.8854], // Cebu City default
+            zoom: 13
+        });
+    }
+}
+
+// Open chat for an offer
+function openChat(offerId, chatTitle) {
+    if (!currentUser) {
+        alert('Please login to use chat.');
+        return;
+    }
+    
+    initializeChatSystem();
+    chatSystem.open(offerId, currentUser, chatTitle);
+}
+
+// Show volunteer location on map
+async function showVolunteerLocation(offerId) {
+    try {
+        const response = await fetch(`${API_URL}/offers/${offerId}/volunteer-location`, {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to load location');
+        }
+        
+        const data = await response.json();
+        
+        // Parse location (assumes format like "Cebu City" or "10.3157,123.8854")
+        let latitude = DEFAULT_MAP_CENTER.latitude;
+        let longitude = DEFAULT_MAP_CENTER.longitude;
+        
+        if (data.volunteer_location && data.volunteer_location.includes(',')) {
+            const coords = data.volunteer_location.split(',');
+            const parsedLat = parseFloat(coords[0].trim());
+            const parsedLng = parseFloat(coords[1].trim());
+            
+            // Validate coordinates are within valid ranges
+            if (!isNaN(parsedLat) && !isNaN(parsedLng) && 
+                parsedLat >= -90 && parsedLat <= 90 && 
+                parsedLng >= -180 && parsedLng <= 180) {
+                latitude = parsedLat;
+                longitude = parsedLng;
+            } else {
+                console.warn('Invalid coordinates, using default location');
+            }
+        }
+        
+        // Initialize map if not already done
+        initializeMapDisplay();
+        
+        // Clear existing markers
+        mapDisplay.clearMap();
+        
+        // Add volunteer marker
+        mapDisplay.addVolunteerMarker({
+            id: data.volunteer_id,
+            name: data.volunteer_name,
+            latitude: latitude,
+            longitude: longitude,
+            role: 'Volunteer',
+            status: 'Active'
+        });
+        
+        // Show map modal
+        document.getElementById('map-modal').classList.add('active');
+        
+        // Invalidate size to fix display issues
+        setTimeout(() => {
+            if (mapDisplay.map) {
+                mapDisplay.map.invalidateSize();
+                mapDisplay.fitMapToMarkers();
+            }
+        }, 100);
+        
+    } catch (error) {
+        console.error('Error loading volunteer location:', error);
+        alert(error.message || 'Failed to load volunteer location');
+    }
+}
+
+// View offers for a request
+async function viewRequestOffers(requestId) {
+    try {
+        const response = await fetch(`${API_URL}/requests/${requestId}/offers`, {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to load offers');
+        }
+        
+        const data = await response.json();
+        displayOffersModal(requestId, data.offers);
+        
+    } catch (error) {
+        console.error('Error loading offers:', error);
+        alert(error.message || 'Failed to load offers');
+    }
+}
+
+// Display offers in a modal
+function displayOffersModal(requestId, offers) {
+    if (offers.length === 0) {
+        alert('No offers available for this request.');
+        return;
+    }
+    
+    const modalHtml = `
+        <div class="modal" id="offers-modal" style="display: flex;">
+            <div class="modal-content" style="max-width: 600px;">
+                <span class="close-modal" id="close-offers-modal">&times;</span>
+                <h2 class="form-title">Offers for Your Request</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    ${offers.map(offer => `
+                        <div class="offer-card" style="margin-bottom: 16px; padding: 16px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <h4 style="margin: 0 0 8px 0;">${offer.volunteer_name}</h4>
+                                    <p style="margin: 0 0 4px 0; color: #666; font-size: 14px;">
+                                        <i class="fas fa-map-marker-alt"></i> ${offer.volunteer_location || 'Location not specified'}
+                                    </p>
+                                    <p style="margin: 0 0 4px 0; color: #666; font-size: 14px;">
+                                        <i class="fas fa-envelope"></i> ${offer.volunteer_email}
+                                    </p>
+                                    <span class="offer-status-badge ${offer.status}">${offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}</span>
+                                </div>
+                            </div>
+                            ${offer.status === 'pending' ? `
+                                <div class="offer-actions">
+                                    <button class="offer-action-btn accept accept-offer-btn" data-offer-id="${offer.offer_id}">
+                                        <i class="fas fa-check"></i> Accept
+                                    </button>
+                                    <button class="offer-action-btn decline decline-offer-btn" data-offer-id="${offer.offer_id}">
+                                        <i class="fas fa-times"></i> Decline
+                                    </button>
+                                    <button class="offer-action-btn chat open-chat-btn" data-offer-id="${offer.offer_id}" data-volunteer-name="${offer.volunteer_name}">
+                                        <i class="fas fa-comments"></i> Chat
+                                    </button>
+                                </div>
+                            ` : offer.status === 'accepted' ? `
+                                <div class="offer-actions">
+                                    <button class="offer-action-btn chat open-chat-btn" data-offer-id="${offer.offer_id}" data-volunteer-name="${offer.volunteer_name}">
+                                        <i class="fas fa-comments"></i> Chat
+                                    </button>
+                                    <button class="offer-action-btn view-map show-map-btn" data-offer-id="${offer.offer_id}">
+                                        <i class="fas fa-map-marked-alt"></i> View Location
+                                    </button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if present
+    const existingModal = document.getElementById('offers-modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Add event listeners
+    document.getElementById('close-offers-modal').addEventListener('click', () => {
+        document.getElementById('offers-modal').remove();
+    });
+    
+    // Accept/decline buttons
+    document.querySelectorAll('.accept-offer-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleAcceptOffer(btn.dataset.offerId));
+    });
+    
+    document.querySelectorAll('.decline-offer-btn').forEach(btn => {
+        btn.addEventListener('click', () => handleDeclineOffer(btn.dataset.offerId));
+    });
+    
+    // Chat buttons
+    document.querySelectorAll('#offers-modal .open-chat-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const volunteerName = btn.dataset.volunteerName;
+            openChat(btn.dataset.offerId, `Chat with ${volunteerName}`);
+        });
+    });
+    
+    // Map buttons
+    document.querySelectorAll('#offers-modal .show-map-btn').forEach(btn => {
+        btn.addEventListener('click', () => showVolunteerLocation(btn.dataset.offerId));
+    });
+    
+    // Close on outside click
+    document.getElementById('offers-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'offers-modal') {
+            document.getElementById('offers-modal').remove();
+        }
+    });
+}
+
+// Accept an offer
+async function handleAcceptOffer(offerId) {
+    if (!confirm('Are you sure you want to accept this offer?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/offers/${offerId}/accept`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            alert('Offer accepted successfully!');
+            document.getElementById('offers-modal').remove();
+            loadRequesterDashboard();
+        } else {
+            alert(data.error || 'Failed to accept offer');
+        }
+    } catch (error) {
+        console.error('Error accepting offer:', error);
+        alert('Connection error. Please try again.');
+    }
+}
+
+// Decline an offer
+async function handleDeclineOffer(offerId) {
+    if (!confirm('Are you sure you want to decline this offer?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/offers/${offerId}/decline`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            alert('Offer declined.');
+            document.getElementById('offers-modal').remove();
+            loadRequesterDashboard();
+        } else {
+            alert(data.error || 'Failed to decline offer');
+        }
+    } catch (error) {
+        console.error('Error declining offer:', error);
+        alert('Connection error. Please try again.');
+    }
+}
+
+// Setup event listeners for chat and map
+function setupChatMapEventListeners() {
+    // Close map modal
+    const mapCloseBtn = document.getElementById('map-close-btn');
+    if (mapCloseBtn) {
+        mapCloseBtn.addEventListener('click', () => {
+            document.getElementById('map-modal').classList.remove('active');
+        });
+    }
+    
+    // Close map on outside click
+    const mapModal = document.getElementById('map-modal');
+    if (mapModal) {
+        mapModal.addEventListener('click', (e) => {
+            if (e.target === mapModal) {
+                mapModal.classList.remove('active');
+            }
+        });
+    }
+}
+
+// Initialize chat and map listeners on page load
+document.addEventListener('DOMContentLoaded', () => {
+    setupChatMapEventListeners();
+});
+
+// Add event delegation for dynamically created buttons
+document.addEventListener('click', (e) => {
+    // View offers button
+    if (e.target.closest('.view-offers-btn')) {
+        const btn = e.target.closest('.view-offers-btn');
+        viewRequestOffers(btn.dataset.requestId);
+    }
+    
+    // Open chat button
+    if (e.target.closest('.open-chat-btn')) {
+        const btn = e.target.closest('.open-chat-btn');
+        const offerId = btn.dataset.offerId;
+        const chatPartner = btn.dataset.requesterName || btn.dataset.volunteerName || 'User';
+        openChat(offerId, `Chat with ${chatPartner}`);
+    }
+    
+    // Show map button
+    if (e.target.closest('.show-map-btn')) {
+        const btn = e.target.closest('.show-map-btn');
+        showVolunteerLocation(btn.dataset.offerId);
+    }
+});
 
 window.navigateToSection = navigateToSection;

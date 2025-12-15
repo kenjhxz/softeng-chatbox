@@ -46,6 +46,7 @@ CREATE TABLE help_offers (
     request_id INT NOT NULL,
     offer_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     status ENUM('pending', 'accepted', 'declined') DEFAULT 'pending',
+    accepted_at DATETIME DEFAULT NULL,
     FOREIGN KEY (volunteer_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (request_id) REFERENCES requests(request_id) ON DELETE CASCADE
 );
@@ -58,6 +59,17 @@ CREATE TABLE notifications (
     is_read BOOLEAN DEFAULT FALSE,
     sent_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (recipient_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+-- Messages table for chat functionality
+CREATE TABLE messages (
+    message_id INT PRIMARY KEY AUTO_INCREMENT,
+    offer_id INT NOT NULL,
+    sender_id INT NOT NULL,
+    message_text TEXT NOT NULL,
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (offer_id) REFERENCES help_offers(offer_id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
 -- External auth table (for future OAuth integration)
@@ -103,6 +115,8 @@ CREATE INDEX idx_requests_requester ON requests(requester_id);
 CREATE INDEX idx_offers_volunteer ON help_offers(volunteer_id);
 CREATE INDEX idx_offers_request ON help_offers(request_id);
 CREATE INDEX idx_notifications_recipient ON notifications(recipient_id);
+CREATE INDEX idx_messages_offer ON messages(offer_id);
+CREATE INDEX idx_messages_sender ON messages(sender_id);
 
 SELECT 'Database setup complete!' as Message;
 
