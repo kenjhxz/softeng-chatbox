@@ -215,7 +215,7 @@ class ChatSystem {
                         <span class="chat-message-time">${this.formatTime(msg.sent_at)}</span>
                     </div>
                     <div class="chat-message-content">
-                        ${this.escapeHtml(msg.message_text)}
+                        ${msg.message_text}
                     </div>
                 </div>
             `;

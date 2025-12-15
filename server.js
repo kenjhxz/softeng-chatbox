@@ -84,6 +84,22 @@ const pool = mysql.createPool({
     }
 })();
 
+// ==================== HELPER FUNCTIONS ====================
+
+// HTML sanitization to prevent XSS attacks
+function sanitizeHtml(text) {
+    if (!text) return '';
+    
+    // Replace HTML special characters
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/\//g, '&#x2F;');
+}
+
 // ==================== AUTH MIDDLEWARE ====================
 
 const isAuthenticated = (req, res, next) => {
@@ -796,10 +812,13 @@ app.post('/api/messages', isAuthenticated, async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
         
-        // Insert message with XSS protection (database stores raw text)
+        // Sanitize message text to prevent XSS attacks
+        const sanitizedText = sanitizeHtml(message_text);
+        
+        // Insert sanitized message
         const [result] = await pool.query(
             'INSERT INTO messages (offer_id, sender_id, message_text) VALUES (?, ?, ?)',
-            [offer_id, sender_id, message_text]
+            [offer_id, sender_id, sanitizedText]
         );
         
         // Send notification to the other party

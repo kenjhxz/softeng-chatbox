@@ -1258,6 +1258,12 @@ function addUrgentTimers() {
 let chatSystem = null;
 let mapDisplay = null;
 
+// Default map center (Cebu City, Philippines)
+const DEFAULT_MAP_CENTER = {
+    latitude: 10.3157,
+    longitude: 123.8854
+};
+
 // Initialize chat system
 function initializeChatSystem() {
     if (!chatSystem) {
@@ -1305,13 +1311,23 @@ async function showVolunteerLocation(offerId) {
         const data = await response.json();
         
         // Parse location (assumes format like "Cebu City" or "10.3157,123.8854")
-        let latitude = 10.3157;
-        let longitude = 123.8854;
+        let latitude = DEFAULT_MAP_CENTER.latitude;
+        let longitude = DEFAULT_MAP_CENTER.longitude;
         
         if (data.volunteer_location && data.volunteer_location.includes(',')) {
             const coords = data.volunteer_location.split(',');
-            latitude = parseFloat(coords[0].trim());
-            longitude = parseFloat(coords[1].trim());
+            const parsedLat = parseFloat(coords[0].trim());
+            const parsedLng = parseFloat(coords[1].trim());
+            
+            // Validate coordinates are within valid ranges
+            if (!isNaN(parsedLat) && !isNaN(parsedLng) && 
+                parsedLat >= -90 && parsedLat <= 90 && 
+                parsedLng >= -180 && parsedLng <= 180) {
+                latitude = parsedLat;
+                longitude = parsedLng;
+            } else {
+                console.warn('Invalid coordinates, using default location');
+            }
         }
         
         // Initialize map if not already done
@@ -1450,7 +1466,6 @@ function displayOffersModal(requestId, offers) {
     // Chat buttons
     document.querySelectorAll('#offers-modal .open-chat-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const volunteerId = btn.dataset.volunteerId;
             const volunteerName = btn.dataset.volunteerName;
             openChat(btn.dataset.offerId, `Chat with ${volunteerName}`);
         });
